@@ -48,3 +48,12 @@ def load_dataset(directory: Path | str | None = None) -> Dataset:
 def cohort_table(metadata: pd.DataFrame) -> pd.Series:
     """Number of samples per condition."""
     return metadata["condition"].value_counts().sort_index()
+
+
+def add_lane(metadata: pd.DataFrame) -> pd.DataFrame:
+    """Return metadata with a `lane` column (L1 / L2) taken from the sample ID suffix."""
+    lane = metadata.index.to_series().str.extract(r"_(L\d+)$", expand=False)
+    if lane.isna().any():
+        bad = list(lane.index[lane.isna()][:5])
+        raise ValueError(f"Sample IDs without a lane suffix such as _L1: {bad}")
+    return metadata.assign(lane=lane.to_numpy())

@@ -29,4 +29,6 @@ jobs:
         run: uv run pytest
 
       - name: Smoke test the CLI
-        run: uv run bioinfo-agent info
+        run: |
+          uv run bioinfo-agent info
+          uv run bioinfo-agent gene STAT1 CIITA
