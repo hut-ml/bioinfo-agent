@@ -31,6 +31,7 @@ class Reply:
     plots: list[dict] = field(
         default_factory=list
     )  # e.g. {"plot": "pca", "x": 1, "y": 2}
+    tables: list[dict] = field(default_factory=list)  # {"title": ..., "rows": [...]}
 
 
 # Words that look like gene symbols once upper-cased but are almost always plain English.
@@ -76,6 +77,10 @@ def _wants_gene_list(q: str) -> bool:
     )
 
 
+def _wants_volcano(q: str) -> bool:
+    return bool(re.search(r"volcano", q))
+
+
 def _wants_pca(q: str) -> bool:
     return bool(re.search(r"\bpca\b|principal component|\bplot\b|cluster", q))
 
@@ -105,6 +110,7 @@ def _help_text() -> str:
         "or 'Show the top 20 down genes'.\n"
         "- Ask about specific genes, e.g. 'Is STAT1 differentially expressed?' or "
         "'CIITA and IDH3B'.\n"
+        "- Ask for a volcano plot ('Show the volcano plot') to see up and down regulated genes.\n"
         "- Ask about the lane confounding, e.g. 'Which genes are lane sensitive?' or "
         "'Show the PCA' or 'Do the lane-adjusted genes replicate in L2?'.\n"
         f"A gene counts as differentially expressed when padj < {t['padj']:g} and "
@@ -126,7 +132,8 @@ def _gene_answer(names: list[str]) -> Reply:
         lines.append(f"{label}: {g['verdict']}")
         if g.get("did_you_mean"):
             lines.append(f"  Did you mean: {', '.join(g['did_you_mean'])}?")
-    return Reply("\n".join(lines), steps)
+    table = tools.result_table("get_genes", {"names": names}, found)
+    return Reply("\n".join(lines), steps, tables=[table] if table else [])
 
 
 def _list_answer(q: str) -> Reply:
@@ -162,7 +169,12 @@ def _list_answer(q: str) -> Reply:
         f"{g['gene']:<12}{g['log2fc']:>+8.2f}{g['padj']:>11.2g}{g['direction']:>6}"
         for g in hits
     ]
-    return Reply("\n".join([header, *rows, "", LANE_CAVEAT]), steps)
+    table = tools.result_table("list_de_genes", args, hits)
+    return Reply(
+        "\n".join([header, *rows, "", LANE_CAVEAT]),
+        steps,
+        tables=[table] if table else [],
+    )
 
 
 def lane_summary(lc: dict) -> list[str]:
@@ -275,7 +287,32 @@ def _lane_answer(q: str) -> Reply:
         f"Top {len(hits)} genes whose call changes with lane:",
         *rows,
     ]
-    return Reply("\n".join(text), steps)
+    table = tools.result_table(
+        "list_lane_sensitive_genes", {"flag": flag, "n": DEFAULT_TOP_N}, hits
+    )
+    return Reply("\n".join(text), steps, tables=[table] if table else [])
+
+
+def _volcano_answer(q: str, names: list[str]) -> Reply:
+    model = "lane_adjusted" if re.search(r"lane|adjust", q) else "headline"
+    plot = tools.show_volcano(model, names)
+    ov = tools.get_overview()
+    args = {"model": model, "genes": plot["genes"]}
+    steps = [
+        Step("call", format_call("show_volcano", args)),
+        Step("result", summarise_result("show_volcano", plot)),
+        Step("call", format_call("get_overview", {})),
+        Step("result", summarise_result("get_overview", ov)),
+    ]
+    text = (
+        f"Volcano plot of every tested gene ({model.replace('_', '-')} model): "
+        "log2 fold change on the x axis, -log10 adjusted p-value on the y axis. "
+        f"{ov['n_up']} genes are up and {ov['n_down']} down in treated in the headline model "
+        "(dashed lines mark the thresholds)."
+    )
+    if plot["genes"]:
+        text += f" Marked: {', '.join(plot['genes'])}."
+    return Reply(text, steps, plots=[plot])
 
 
 def _pca_answer(q: str) -> Reply:
@@ -306,6 +343,8 @@ def answer(question: str) -> Reply:
     q = question.lower()
     table, _ = queries.load_results()
     names = _gene_candidates(question, set(table.index.str.upper()))
+    if _wants_volcano(q):
+        return _volcano_answer(q, names)
     if names:
         return _gene_answer(names)
     if _wants_pca(q):

@@ -52,11 +52,11 @@ the prepared results through tools.
 flowchart TB
     subgraph qa["2. Answering questions"]
         direction TB
-        USER(["User"]) <-->|"question / answer"| FE["Front end<br/>ui.py (Gradio, main; draws plots) or cli.py (chat, ask)"]
+        USER(["User"]) <-->|"question / answer"| FE["Front end<br/>ui.py (Gradio, main; chat + plots/tables panel) or cli.py (chat, ask)"]
         FE <--> AS["agent.py: Assistant<br/>picks the backend, keeps the conversation"]
         AS --> LLM["LLM agent (Pydantic AI)<br/>decides which tools to call"]
         AS -.->|"no LLM or call failed"| OFF["offline.py<br/>keyword router (backup)"]
-        LLM <-->|"tool calls / results"| T["tools.py<br/>get_overview, list_de_genes, get_genes,<br/>list_lane_sensitive_genes, get_lane_check,<br/>get_l2_concordance, show_pca"]
+        LLM <-->|"tool calls / results"| T["tools.py<br/>get_overview, list_de_genes, get_genes,<br/>list_lane_sensitive_genes, get_lane_check,<br/>get_l2_concordance, show_pca, show_volcano"]
         OFF <-->|"same tools"| T
         T --> Q["queries.py<br/>read the results"]
     end
@@ -86,11 +86,11 @@ flowchart TB
 │   ├── data.py              Load counts and metadata, check sample IDs, derive lane
 │   ├── analysis.py          PyDESeq2 runs (three models) and PCA (`precompute`), writes results/
 │   ├── queries.py           Read results/: overview, top genes, gene lookup, lane check
-│   ├── tools.py             The seven tools the agent can call (wrap queries.py)
-│   ├── plots.py             PCA figures (plotly), built from results/pca*.csv
+│   ├── tools.py             The eight tools the agent can call (wrap queries.py)
+│   ├── plots.py             Volcano and PCA figures (plotly), built from results/
 │   ├── offline.py           Keyword router that answers without an LLM
 │   ├── agent.py             Backend selection, Pydantic AI agent, Assistant (conversation + fallback)
-│   ├── ui.py                Gradio chat front end (collapsible tool steps, inline plots)
+│   ├── ui.py                Gradio front end: chat, plus a side panel for plots, tables and history
 │   └── cli.py               Typer commands: ui, chat, ask, genes, gene, lane, info, precompute
 ├── tests/                   pytest (data, analysis, queries, agent, CLI, UI)
 ├── .github/workflows/       CI: lint, tests, CLI smoke checks on macOS and Windows
@@ -102,9 +102,9 @@ flowchart TB
 
 **Quick start.** With no setup the app runs in offline mode (keyword matching, no LLM, no network), which answers the three core questions. For free-form questions, copy `.env.example` to `.env` and set your own `OPENAI_API_KEY` (or point `LLM_BASE_URL` at a local server). Then run `uv run bioinfo-agent chat`.
 
-`chat` and `ask` print each tool call and a one-line result, then the model's reasoning summary when the backend provides one, then the answer. The model never sees the raw counts: it calls seven tools over the precomputed results (`get_overview`, `list_de_genes`, `get_genes`, and for the lane question `list_lane_sensitive_genes`, `get_lane_check`, `get_l2_concordance`, `show_pca`), and its prompt requires every number to come from a tool result.
+`chat` and `ask` print each tool call and a one-line result, then the model's reasoning summary when the backend provides one, then the answer. The model never sees the raw counts: it calls eight tools over the precomputed results (`get_overview`, `list_de_genes`, `get_genes`, and for the lane question `list_lane_sensitive_genes`, `get_lane_check`, `get_l2_concordance`, `show_pca`, `show_volcano`), and its prompt requires every number to come from a tool result.
 
-`ui` serves the same agent as a Gradio chat. Each tool call, tool result and reasoning summary appears as a collapsible message above the answer, example prompts fill the input box, and the active backend is shown at the top. Each browser session has its own conversation; "New conversation" resets it.
+`ui` serves the same agent as a Gradio chat. Each tool call, tool result and reasoning summary appears as a collapsible message above the answer, example prompts below the input box fill it, and the active backend is shown at the top. Plots and gene tables do not clutter the chat: they open in a collapsible panel on the right (fold it away for a wider chat) with three tabs. **Plots** shows the volcano plot (every gene, up/down/not significant, optionally marking genes; hover, zoom and legend toggles are interactive) and the PCA plots; **Tables** shows gene lists, where clicking a row marks that gene on the volcano plot and shows its verdict; **History** lists every plot and table of the conversation, and clicking a row reopens it. Ask "Show the volcano plot" (or "lane-adjusted volcano plot", "volcano plot marking STAT1"). Each browser session has its own conversation; "New conversation" resets it.
 
 ### Backends
 
@@ -168,7 +168,7 @@ four checks show how much lane matters (`bioinfo-agent lane`, or ask the chat):
    p = 2e-11; treated-L2 vs treated-L1: p = 1e-09. Lane therefore moves samples along the same axis as the
    treatment, by about half as much. A second PCA on the 50 treated samples only removes the treatment axis:
    L1 and L2 still separate, on PC2 (12% of the variance, p = 3e-09), PC1 (p = 0.003) and PC3 (p = 0.02), so
-   that separation is a lane effect. Both plots are available in the chat ("Show the PCA").
+   that separation is a lane effect. Both plots are available in the UI ("Show the PCA").
 4. **Directional check in L2.** The 277 lane-adjusted DE genes are estimated from L1 samples only. In
    treated-L2 vs control-L1 (65 samples), 270 of them (97.5%) move the same way (up 98.3%, down 96.1%), and
    260 of the 262 that are also significant in L2 agree (99.2%). The baseline

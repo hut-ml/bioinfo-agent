@@ -51,6 +51,7 @@ def test_every_tool_runs_against_the_results():
         "get_lane_check",
         "get_l2_concordance",
         "show_pca",
+        "show_volcano",
     }
 
 
@@ -202,3 +203,30 @@ def test_offline_concordance_question_calls_the_tool_and_reports_the_baseline():
     reply = offline.answer("Are the lane-adjusted genes confirmed in L2?")
     assert [s.text for s in reply.steps if s.kind == "call"] == ["get_l2_concordance()"]
     assert "of 277 genes" in reply.answer and "not DE agree" in reply.answer
+
+
+def test_offline_volcano_question_returns_a_plot_marking_the_named_genes():
+    reply = offline.answer("Show the volcano plot and mark STAT1 and nope123")
+    assert reply.plots == [
+        {"plot": "volcano", "model": "headline", "genes": ["STAT1"], "shown": True}
+    ]
+    assert offline.answer("lane adjusted volcano").plots[0]["model"] == "lane_adjusted"
+
+
+def test_assistant_returns_volcano_plots_and_gene_tables():
+    model = _scripted(
+        ("show_volcano", {"model": "sideways"}),
+        ("show_volcano", {"model": "lane_adjusted", "genes": ["ciita"]}),
+        ("list_de_genes", {"direction": "up", "n": 3}),
+        ("get_genes", {"names": ["CIITA", "NOPE1"]}),
+    )
+    reply = Assistant(Backend("openai"), build_agent(model)).ask("volcano")
+    assert reply.plots == [
+        {"plot": "volcano", "model": "lane_adjusted", "genes": ["CIITA"], "shown": True}
+    ]
+    assert [t["title"] for t in reply.tables] == [
+        "Differentially expressed genes (direction=up, n=3)",
+        "Gene lookup",
+    ]
+    assert [len(t["rows"]) for t in reply.tables] == [3, 1]
+    assert offline.answer("top 5 genes").tables[0]["rows"][0]["gene"]

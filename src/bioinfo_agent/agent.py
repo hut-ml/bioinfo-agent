@@ -48,8 +48,10 @@ a gene is a lane artefact as a fact: say it may be one. Use list_lane_sensitive_
 get_lane_check for questions about lane, batch or confounding, and get_l2_concordance to \
 ask whether the lane-adjusted genes are confirmed in L2 (always give the baseline next to the \
 concordance; it is supporting evidence, not an independent replicate).
-- For a PCA or a request to see the samples, call show_pca (the plot appears in the chat), then \
-describe it using get_lane_check numbers only.
+- For a PCA or a request to see the samples, call show_pca, then describe it using get_lane_check \
+numbers only. For a volcano plot or a request to see which genes are up or down regulated overall, \
+call show_volcano (optionally marking genes), then describe it using get_overview or list_de_genes \
+numbers only. Plots and gene tables appear in a side panel next to the chat, not in the message.
 - You cannot run new analyses or look up pathways yet. Say so if asked.
 - Write for a biologist: short, plain language, gene symbols as given by the tool. Don't show \
 raw JSON.
@@ -163,16 +165,40 @@ def _steps(messages: list[ModelMessage]) -> list[Step]:
     return steps
 
 
+PLOT_TOOLS = ("show_pca", "show_volcano")
+
+
 def _plots(messages: list[ModelMessage]) -> list[dict]:
-    """Plot requests returned by show_pca; the front end draws them."""
+    """Plot requests returned by show_pca and show_volcano; the front end draws them."""
     return [
         part.content
         for message in messages
         for part in message.parts
         if isinstance(part, ToolReturnPart)
-        and part.tool_name == "show_pca"
+        and part.tool_name in PLOT_TOOLS
         and part.outcome == "success"
     ]
+
+
+def _tables(messages: list[ModelMessage]) -> list[dict]:
+    """Gene tables for the side panel, from the gene-list tool results."""
+    args: dict[str, dict] = {}
+    tables = []
+    for message in messages:
+        for part in message.parts:
+            if isinstance(part, ToolCallPart):
+                args[part.tool_call_id] = part.args_as_dict()
+            elif isinstance(part, ToolReturnPart) and part.outcome == "success":
+                table = (
+                    tools.result_table(
+                        part.tool_name, args.get(part.tool_call_id, {}), part.content
+                    )
+                    if part.tool_name in tools.TABLE_TOOLS
+                    else None
+                )
+                if table:
+                    tables.append(table)
+    return tables
 
 
 class Assistant:
@@ -201,7 +227,7 @@ class Assistant:
             return reply
         self._history = result.all_messages()
         new = result.new_messages()
-        return Reply(result.output, _steps(new), plots=_plots(new))
+        return Reply(result.output, _steps(new), plots=_plots(new), tables=_tables(new))
 
 
 def _describe(exc: Exception) -> str:

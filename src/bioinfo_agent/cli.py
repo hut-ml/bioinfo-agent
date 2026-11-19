@@ -148,11 +148,12 @@ def _show(reply) -> None:
         else:
             typer.echo(f"  <- {step.text}", err=True)
     for plot in reply.plots:
-        typer.echo(
-            f"  [plot: PCA ({plot['subset']}) PC{plot['x']} vs PC{plot['y']}; "
-            "shown in `bioinfo-agent ui`]",
-            err=True,
+        what = (
+            f"volcano ({plot['model']})"
+            if plot["plot"] == "volcano"
+            else f"PCA ({plot['subset']}) PC{plot['x']} vs PC{plot['y']}"
         )
+        typer.echo(f"  [plot: {what}; shown in `bioinfo-agent ui`]", err=True)
     typer.echo(f"\n{reply.answer}\n")
 
 

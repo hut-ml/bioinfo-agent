@@ -6,6 +6,7 @@ from pydantic_ai.toolsets import FunctionToolset
 
 from bioinfo_agent import queries
 from bioinfo_agent.analysis import N_PCS
+from bioinfo_agent.plots import VOLCANO_MODELS
 
 MAX_GENES = 50
 
@@ -82,7 +83,42 @@ def summarise_result(name: str, result) -> str:
             "treated samples only" if result["subset"] == "treated" else "all samples"
         )
         return f"PCA plot ({what}), PC{result['x']} vs PC{result['y']}"
+    if name == "show_volcano":
+        marked = f", marking {', '.join(result['genes'])}" if result["genes"] else ""
+        return f"volcano plot ({result['model'].replace('_', '-')} model){marked}"
     return str(result)[:100]
+
+
+TABLE_TOOLS = ("list_de_genes", "get_genes", "list_lane_sensitive_genes")
+_TABLE_TITLES = {
+    "list_de_genes": "Differentially expressed genes",
+    "get_genes": "Gene lookup",
+    "list_lane_sensitive_genes": "Lane-sensitive genes",
+}
+_TABLE_COLUMNS = (
+    "gene",
+    "direction",
+    "log2fc",
+    "padj",
+    "base_mean",
+    "lane_flag",
+    "log2fc_lane_adjusted",
+    "padj_lane_adjusted",
+)
+
+
+def result_table(name: str, args: dict, result: list[dict]) -> dict | None:
+    """A table for the side panel from a gene-list tool result, or None if there is nothing to show."""
+    if name not in TABLE_TOOLS:
+        return None
+    rows = [
+        {col: g[col] for col in _TABLE_COLUMNS} for g in result if g.get("found", True)
+    ]
+    if not rows:
+        return None
+    detail = ", ".join(f"{k}={v}" for k, v in args.items() if k != "names")
+    title = _TABLE_TITLES[name] + (f" ({detail})" if detail else "")
+    return {"title": title, "rows": rows}
 
 
 @toolset.tool_plain
@@ -128,3 +164,18 @@ def show_pca(x: int = 1, y: int = 2, subset: str = "all") -> dict:
     if subset not in queries.PCA_SUBSETS:
         raise ModelRetry(f"subset must be one of {queries.PCA_SUBSETS}")
     return {"plot": "pca", "x": x, "y": y, "subset": subset, "shown": True}
+
+
+@toolset.tool_plain
+def show_volcano(model: str = "headline", genes: list[str] | None = None) -> dict:
+    """Show a volcano plot of every tested gene (log2 fold change against -log10 adjusted p-value,
+    coloured up / down / not significant) to the user, to see which genes are up or down regulated.
+    model: 'headline' (~ condition, the default) or 'lane_adjusted' (~ lane + condition).
+    genes: optional gene symbols to mark and label on the plot. The plot appears in the side panel;
+    use list_de_genes or get_genes to read the numbers behind it."""
+    if model not in VOLCANO_MODELS:
+        raise ModelRetry(f"model must be one of {tuple(VOLCANO_MODELS)}")
+    found = [
+        g["gene"] for g in queries.get_genes((genes or [])[:MAX_GENES]) if g["found"]
+    ]
+    return {"plot": "volcano", "model": model, "genes": found, "shown": True}

@@ -1,5 +1,7 @@
 """Plots built from the precomputed results only."""
 
+import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -91,5 +93,115 @@ def pca_figure(x: int = 1, y: int = 2, subset: str = "all") -> go.Figure:
         height=420,
         margin={"t": 90, "b": 50, "l": 60, "r": 20},
         legend={"orientation": "h", "y": -0.2},
+    )
+    return fig
+
+
+VOLCANO_MODELS = {
+    "headline": ("log2fc", "padj", "direction", "treated vs control, ~ condition"),
+    "lane_adjusted": (
+        "log2fc_lane_adj",
+        "padj_lane_adj",
+        "direction_lane_adj",
+        "treated vs control, ~ lane + condition",
+    ),
+}
+DIRECTION_STYLE = {
+    "up": ("Up in treated", "#d95f02"),
+    "down": ("Down in treated", "#1f77b4"),
+    "ns": ("Not significant", "#bbbbbb"),
+}
+
+
+def volcano_figure(
+    model: str = "headline", highlight: list[str] | tuple[str, ...] = ()
+) -> go.Figure:
+    """Volcano plot of every tested gene: shrunken log2FC against -log10(adjusted p-value).
+
+    model: 'headline' (~ condition) or 'lane_adjusted' (~ lane + condition). highlight: gene
+    symbols to mark and label (case-insensitive; unknown symbols are ignored).
+    """
+    if model not in VOLCANO_MODELS:
+        raise ValueError(f"model must be one of {tuple(VOLCANO_MODELS)}")
+    fc_col, padj_col, dir_col, description = VOLCANO_MODELS[model]
+    table, summary = queries.load_results()
+    thresholds = summary["thresholds"]
+    padj = table[padj_col].fillna(1.0)
+    # padj underflows to 0 for the strongest genes: draw them just above the highest finite value.
+    finite = -np.log10(padj[padj > 0])
+    ceiling = float(finite.max()) * 1.1 if len(finite) else 1.0
+    neg_log_padj = pd.Series(
+        np.where(padj > 0, -np.log10(padj.clip(lower=1e-300)), ceiling),
+        index=table.index,
+    )
+    capped = int((padj == 0).sum())
+
+    fig = go.Figure()
+    for direction in ("ns", "down", "up"):
+        name, color = DIRECTION_STYLE[direction]
+        sel = table[dir_col] == direction
+        fig.add_trace(
+            go.Scattergl(
+                x=table.loc[sel, fc_col],
+                y=neg_log_padj[sel],
+                mode="markers",
+                name=f"{name} ({int(sel.sum())})",
+                text=table.index[sel],
+                customdata=np.column_stack([padj[sel], table.loc[sel, "base_mean"]]),
+                hovertemplate="<b>%{text}</b><br>log2FC=%{x:.2f}<br>padj=%{customdata[0]:.2g}"
+                "<br>mean count=%{customdata[1]:.0f}<extra></extra>",
+                marker={
+                    "size": 4 if direction == "ns" else 6,
+                    "color": color,
+                    "opacity": 0.5 if direction == "ns" else 0.85,
+                },
+            )
+        )
+    upper = pd.Series(table.index, index=table.index.str.upper())
+    wanted = dict.fromkeys(h.upper() for h in highlight)
+    marked = [upper[g] for g in wanted if g in upper.index]
+    if marked:
+        fig.add_trace(
+            go.Scatter(
+                x=table.loc[marked, fc_col],
+                y=neg_log_padj[marked],
+                mode="markers+text",
+                name="Selected",
+                text=marked,
+                textposition="top center",
+                hoverinfo="skip",
+                marker={
+                    "size": 11,
+                    "color": "rgba(0,0,0,0)",
+                    "line": {"width": 2, "color": "black"},
+                },
+            )
+        )
+    fig.add_hline(
+        y=-np.log10(thresholds["padj"]),
+        line={"dash": "dash", "color": "#888", "width": 1},
+    )
+    for x in (-thresholds["abs_log2fc"], thresholds["abs_log2fc"]):
+        fig.add_vline(x=x, line={"dash": "dash", "color": "#888", "width": 1})
+    if capped:
+        fig.add_annotation(
+            text=f"{capped} genes with padj = 0 are drawn at the top",
+            xref="paper",
+            yref="paper",
+            x=1,
+            y=1.02,
+            xanchor="right",
+            yanchor="bottom",
+            showarrow=False,
+            font={"size": 11, "color": "#666"},
+        )
+    fig.update_layout(
+        title=f"Volcano plot ({description})",
+        xaxis_title="log2 fold change (shrunken, treated vs control)",
+        yaxis_title="-log10(adjusted p-value)",
+        template="plotly_white",
+        height=520,
+        margin={"t": 70, "b": 50, "l": 60, "r": 20},
+        legend={"orientation": "h", "y": -0.18},
     )
     return fig
