@@ -106,7 +106,10 @@ flowchart TB
 
 `chat` and `ask` print each tool call and a one-line result, then the model's reasoning summary when the backend provides one, then the answer. The model never sees the raw counts: it calls eight tools over the precomputed results (`get_overview`, `list_de_genes`, `get_genes`, and for the lane question `list_lane_sensitive_genes`, `get_lane_check`, `get_l2_concordance`, `show_pca`, `show_volcano`), and its prompt requires every number to come from a tool result.
 
-`ui` serves the same agent as a Gradio chat. Each tool call, tool result and reasoning summary appears as a collapsible message above the answer, example prompts below the input box fill it, and the active backend is shown at the top. Plots and gene tables do not clutter the chat: they open in a collapsible panel on the right (fold it away for a wider chat) with three tabs. **Plots** shows the volcano plot (every gene, up/down/not significant, optionally marking genes; hover, zoom and legend toggles are interactive) and the PCA plots; **Tables** shows gene lists, where clicking a row marks that gene on the volcano plot and shows its verdict; **History** lists every plot and table of the conversation, and clicking a row reopens it. Ask "Show the volcano plot" (or "lane-adjusted volcano plot", "volcano plot marking STAT1"). Each browser session has its own conversation; "New conversation" resets it.
+`ui` serves the same agent as a Gradio chat. Each tool call, tool result and reasoning summary appears as a collapsible message above the answer, example prompts below the input box fill it, and the active backend is shown at the top.   
+**Plots** shows the volcano plot (every gene, up/down/not significant, optionally marking genes; hover, zoom and legend toggles are interactive) and the PCA plots;  
+**Tables** shows gene lists, where clicking a row marks that gene on the volcano plot and shows its verdict;  
+**History** lists every plot and table of the conversation, and clicking a row reopens it. Ask "Show the volcano plot" (or "lane-adjusted volcano plot", "volcano plot marking STAT1"). Each browser session has its own conversation; "New conversation" resets it.
 
 ### Backends
 
@@ -216,10 +219,6 @@ Two adjusted p-values answer different questions on different samples, so read t
 | IDH3B | Not DE: log2FC -0.06, padj 1 | Down: -1.06, padj 1e-138 | `gained`: treated-L2 is higher than treated-L1 (+1.56), which hides a decrease seen in L1. |
 | STAT1 | Not DE: log2FC -0.03, padj 1 | Not DE: -0.05, padj 1 | Not DE either way. |
 
-### Observations
-
-- Sex-marker genes are not in the data, so sex balance across groups cannot be checked.
-
 ## Deep directions
 
 I chose two directions. Both make sure the scientific findings are correct and well explained to biologists, and that the agent output can be used and investigated by the end user.
@@ -230,9 +229,11 @@ I chose two directions. Both make sure the scientific findings are correct and w
 ## Future development
 
 - Conversation and analysis database: remember interactions per user and pull up past analyses quickly. Results are stored as CSV now; a database scales better.
+- Allow user to upload their own data to run the analysis pipeline with agent and tool calls directly. 
 - Collect feedback from end users and stakeholders to find missing features.
 - LLM as a judge on a golden dataset: completeness, correctness and whether the tool-call path makes sense for different inputs.
 - Version control and traceability (MLflow, LangSmith, ...): prompts, eval dataset, inputs, and each call.
+- Containerizing the package with Docker (and orchestrating via Kubernetes if needed) to ensure consistent, cross-platform execution.
 
 ## Use of coding assistants
 
