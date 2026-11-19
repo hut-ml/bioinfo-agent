@@ -43,7 +43,15 @@ def test_every_tool_runs_against_the_results():
         for p in m.parts
         if p.part_kind == "tool-call"
     }
-    assert called == {"get_overview", "list_de_genes", "get_genes"}
+    assert called == {
+        "get_overview",
+        "list_de_genes",
+        "get_genes",
+        "list_lane_sensitive_genes",
+        "get_lane_check",
+        "get_l2_concordance",
+        "show_pca",
+    }
 
 
 def _scripted(*calls):
@@ -153,3 +161,44 @@ def test_openai_reasoning_settings_come_from_the_environment():
 
     off = resolve_backend("openai", {**env, "OPENAI_REASONING": "off"})
     assert _model_and_settings(off)[1] == {}
+
+
+def test_offline_lane_and_pca_questions_use_the_lane_tools():
+    lane = offline.answer("Which genes are sensitive to the lane effect?")
+    assert [s.text.split("(")[0] for s in lane.steps if s.kind == "call"] == [
+        "get_lane_check",
+        "list_lane_sensitive_genes",
+    ]
+    assert "SPATS2L" in offline.answer("Is SPATS2L DE? Is it a lane artefact?").answer
+    assert (
+        offline.answer("Which genes are lost when adjusting for lane?")
+        .steps[2]
+        .text.startswith("list_lane_sensitive_genes(flag='lost'")
+    )
+    pca = offline.answer("Show me the PCA of L1 vs L2")
+    assert [p["subset"] for p in pca.plots] == ["all", "treated"]
+    assert "Among the treated samples only" in pca.answer
+
+
+def test_show_pca_rejects_an_unknown_subset_and_asks_the_model_to_retry():
+    model = _scripted(
+        ("show_pca", {"subset": "control"}), ("show_pca", {"subset": "treated"})
+    )
+    reply = Assistant(Backend("openai"), build_agent(model)).ask("PCA of treated")
+    assert any("rejected" in s.text for s in reply.steps)
+    assert [p["subset"] for p in reply.plots] == ["treated"]
+
+
+def test_assistant_returns_plot_requests_from_show_pca():
+    model = _scripted(("show_pca", {"x": 1, "y": 3}))
+    reply = Assistant(Backend("openai"), build_agent(model)).ask("Show a PCA")
+    assert reply.plots == [
+        {"plot": "pca", "x": 1, "y": 3, "subset": "all", "shown": True}
+    ]
+    assert reply.steps[1].text == "PCA plot (all samples), PC1 vs PC3"
+
+
+def test_offline_concordance_question_calls_the_tool_and_reports_the_baseline():
+    reply = offline.answer("Are the lane-adjusted genes confirmed in L2?")
+    assert [s.text for s in reply.steps if s.kind == "call"] == ["get_l2_concordance()"]
+    assert "of 277 genes" in reply.answer and "not DE agree" in reply.answer

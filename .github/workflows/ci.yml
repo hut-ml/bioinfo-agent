@@ -32,4 +32,5 @@ jobs:
         run: |
           uv run bioinfo-agent info
           uv run bioinfo-agent gene STAT1 CIITA
+          uv run bioinfo-agent lane
           uv run bioinfo-agent ask "Is STAT1 differentially expressed?" --backend offline

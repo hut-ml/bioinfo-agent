@@ -5,7 +5,7 @@ from typing import Annotated
 import typer
 from dotenv import find_dotenv, load_dotenv
 
-from bioinfo_agent import queries
+from bioinfo_agent import offline, queries
 from bioinfo_agent.data import cohort_table, load_dataset
 
 app = typer.Typer(
@@ -28,12 +28,14 @@ def info() -> None:
 
 @app.command()
 def precompute() -> None:
-    """Run the differential expression analysis and write results/ (takes about a minute)."""
+    """Run the differential expression analysis and write results/ (about a minute)."""
     from bioinfo_agent.analysis import run_de, save_results
 
-    typer.echo("Running DESeq2 (~ condition)...")
-    table, summary = run_de(load_dataset())
-    directory = save_results(table, summary)
+    typer.echo(
+        "Running DESeq2 (~ condition, ~ lane + condition, lane effect) and PCA..."
+    )
+    table, summary, pca, pca_treated = run_de(load_dataset())
+    directory = save_results(table, summary, pca, pca_treated)
     typer.echo(
         f"{summary['n_genes_tested']} genes tested: {summary['n_up']} up, "
         f"{summary['n_down']} down."
@@ -88,6 +90,27 @@ def gene(names: Annotated[list[str], typer.Argument(help="Gene symbols")]) -> No
             typer.echo(f"  Did you mean: {', '.join(g['did_you_mean'])}?")
 
 
+@app.command()
+def lane() -> None:
+    """Is sequencing lane confounded with condition? Summary and the genes whose call changes."""
+    try:
+        check = queries.lane_check()
+        hits = queries.lane_sensitive_genes("all", 10)
+    except queries.ResultsNotFound as exc:
+        raise _fail(exc) from exc
+    for line in [
+        *offline.lane_summary(check),
+        *offline.concordance_summary(check["l2_concordance"]),
+    ]:
+        typer.echo(line)
+    typer.echo(f"\n{'gene':<14}{'flag':<9}{'log2FC':>8}{'adjusted':>10}")
+    for g in hits:
+        typer.echo(
+            f"{g['gene']:<14}{g['lane_flag']:<9}{g['log2fc']:>+8.2f}"
+            f"{g['log2fc_lane_adjusted']:>+10.2f}"
+        )
+
+
 BackendOption = Annotated[
     str,
     typer.Option(
@@ -124,6 +147,12 @@ def _show(reply) -> None:
             typer.echo(f"  -> {step.text}", err=True)
         else:
             typer.echo(f"  <- {step.text}", err=True)
+    for plot in reply.plots:
+        typer.echo(
+            f"  [plot: PCA ({plot['subset']}) PC{plot['x']} vs PC{plot['y']}; "
+            "shown in `bioinfo-agent ui`]",
+            err=True,
+        )
     typer.echo(f"\n{reply.answer}\n")
 
 

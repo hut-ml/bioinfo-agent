@@ -5,6 +5,7 @@ from pydantic_ai import ModelRetry
 from pydantic_ai.toolsets import FunctionToolset
 
 from bioinfo_agent import queries
+from bioinfo_agent.analysis import N_PCS
 
 MAX_GENES = 50
 
@@ -54,8 +55,76 @@ def summarise_result(name: str, result) -> str:
     if name == "get_genes":
         return "; ".join(
             f"{g['gene']}: {g['direction']}"
+            + (f" (lane: {g['lane_flag']})" if g["lane_flag"] != "same" else "")
             if g["found"]
             else f"{g['query']}: not found"
             for g in result
         )
+    if name == "list_lane_sensitive_genes":
+        if not result:
+            return "no genes"
+        names = ", ".join(f"{g['gene']} ({g['lane_flag']})" for g in result[:5])
+        return f"{len(result)} genes: {names}{', ...' if len(result) > 5 else ''}"
+    if name == "get_lane_check":
+        flags = result["flags"]
+        return (
+            f"{flags.get('lost', 0)} lost, {flags.get('gained', 0)} gained, "
+            f"{flags.get('flipped', 0)} flipped when lane is added"
+        )
+    if name == "get_l2_concordance":
+        de, base = result["lane_adjusted_de"], result["baseline_not_de"]
+        return (
+            f"{de['n_same_direction']}/{de['n_genes']} lane-adjusted DE genes agree in L2 "
+            f"({de['fraction']:.1%}); baseline {base['fraction']:.1%}"
+        )
+    if name == "show_pca":
+        what = (
+            "treated samples only" if result["subset"] == "treated" else "all samples"
+        )
+        return f"PCA plot ({what}), PC{result['x']} vs PC{result['y']}"
     return str(result)[:100]
+
+
+@toolset.tool_plain
+def list_lane_sensitive_genes(flag: str = "all", n: int = 10) -> list[dict]:
+    """List genes whose differential expression call changes when sequencing lane is added to
+    the model (lane is partly confounded with condition). flag: 'lost' (DE without lane, not DE
+    with it: possible lane artefacts), 'gained' (the opposite: lane may mask a real effect),
+    'flipped' (reverses direction) or 'all'. n is capped at 50."""
+    try:
+        return queries.lane_sensitive_genes(flag, min(max(n, 1), MAX_GENES))
+    except ValueError as exc:
+        raise ModelRetry(str(exc)) from exc
+
+
+@toolset.tool_plain
+def get_lane_check() -> dict:
+    """Is sequencing lane confounded with condition? Group sizes (every L2 sample is treated),
+    DE gene counts with and without the lane term, how many calls change, and what the PCA shows
+    (variance explained, group means on each PC, p-values for the condition and lane effects, and
+    the same for a PCA of the treated samples only)."""
+    return queries.lane_check()
+
+
+@toolset.tool_plain
+def get_l2_concordance() -> dict:
+    """Independent directional check of the lane-adjusted DE genes. Those genes are estimated from
+    L1 samples only (treated-L1 vs control-L1). This reports how many move in the same direction in
+    treated-L2 vs control-L1, overall, for up and down genes, and for genes also significant in L2,
+    next to a baseline of genes that are not DE (the lane shift alone pushes that above 50%).
+    Control-L1 samples are shared, so it is supporting evidence, not a fully independent replicate."""
+    return queries.l2_concordance()
+
+
+@toolset.tool_plain
+def show_pca(x: int = 1, y: int = 2, subset: str = "all") -> dict:
+    """Show a PCA plot of the samples to the user. subset 'all': all 90 samples, drawn twice
+    (left coloured by condition, right by lane). subset 'treated': the 50 treated samples only,
+    coloured by lane, which removes the treatment effect so any L1/L2 separation is a lane effect.
+    x and y are principal components 1 to 5. The plot is displayed in the chat; use get_lane_check
+    to read the numbers behind it."""
+    if not (1 <= x <= N_PCS and 1 <= y <= N_PCS) or x == y:
+        raise ModelRetry(f"x and y must be two different components from 1 to {N_PCS}")
+    if subset not in queries.PCA_SUBSETS:
+        raise ModelRetry(f"subset must be one of {queries.PCA_SUBSETS}")
+    return {"plot": "pca", "x": x, "y": y, "subset": subset, "shown": True}

@@ -4,6 +4,7 @@ import gradio as gr
 
 from bioinfo_agent.agent import Assistant, Backend
 from bioinfo_agent.offline import Reply
+from bioinfo_agent.plots import pca_figure
 
 EXAMPLES = [
     "How can you help me?",
@@ -11,6 +12,8 @@ EXAMPLES = [
     "Is STAT1 differentially expressed?",
     "What about CIITA, SPATS2L and IDH3B?",
     "How many genes are differentially expressed, and how was that decided?",
+    "Show the PCA: does lane or condition drive the variation?",
+    "Which genes are sensitive to the lane effect?",
 ]
 
 _STEP_TITLES = {
@@ -21,7 +24,7 @@ _STEP_TITLES = {
 
 
 def reply_to_messages(reply: Reply) -> list[dict]:
-    """Chat messages for a reply: one collapsible message per step, then the answer."""
+    """Chat messages for a reply: one collapsible message per step, the answer, then any plots."""
     messages = [
         {
             "role": "assistant",
@@ -33,6 +36,9 @@ def reply_to_messages(reply: Reply) -> list[dict]:
     if reply.notice:
         messages.append({"role": "assistant", "content": f"⚠️ {reply.notice}"})
     messages.append({"role": "assistant", "content": reply.answer})
+    for plot in reply.plots:
+        figure = pca_figure(plot["x"], plot["y"], plot["subset"])
+        messages.append({"role": "assistant", "content": gr.Plot(figure)})
     return messages
 
 
@@ -55,30 +61,37 @@ def build_ui(backend: Backend) -> gr.Blocks:
         )
         gr.Examples(EXAMPLES, inputs=box, label="Try one of these")
         clear = gr.Button("New conversation")
-        # One Assistant (and so one conversation history) per browser session.
+        # Per browser session: one Assistant (the model's history) and the messages shown. The
+        # shown messages live in state, not read back from the chatbot, so plots are not round-tripped.
         assistant_state = gr.State(None)
+        shown_state = gr.State([])
 
-        def respond(question, history, assistant):
+        def respond(question, shown, assistant):
             question = (question or "").strip()
             if not question:
-                yield history, assistant, gr.update()
+                yield shown, shown, assistant, gr.update()
                 return
             assistant = assistant or Assistant(backend)
-            history = [*history, {"role": "user", "content": question}]
+            shown = [*shown, {"role": "user", "content": question}]
             pending = {
                 "role": "assistant",
                 "content": "",
                 "metadata": {"title": "Working…", "status": "pending"},
             }
-            yield [*history, pending], assistant, ""
-            yield [*history, *reply_to_messages(assistant.ask(question))], assistant, ""
+            yield [*shown, pending], shown, assistant, ""
+            shown = [*shown, *reply_to_messages(assistant.ask(question))]
+            yield shown, shown, assistant, ""
 
         box.submit(
             respond,
-            [box, chatbot, assistant_state],
-            [chatbot, assistant_state, box],
+            [box, shown_state, assistant_state],
+            [chatbot, shown_state, assistant_state, box],
         )
-        clear.click(lambda: ([], None, ""), None, [chatbot, assistant_state, box])
+        clear.click(
+            lambda: ([], [], None, ""),
+            None,
+            [chatbot, shown_state, assistant_state, box],
+        )
     return demo
 
 

@@ -18,6 +18,135 @@
   "n_genes_with_padj": 15831,
   "n_up": 222,
   "n_down": 100,
+  "lane_check": {
+    "lane_adjusted_design": "~ lane + condition",
+    "n_up_lane_adjusted": 174,
+    "n_down_lane_adjusted": 103,
+    "flags": {
+      "same": 15742,
+      "lost": 67,
+      "gained": 22
+    },
+    "lane_effect_among_changed": {
+      "lost": 53,
+      "gained": 12,
+      "flipped": 0
+    },
+    "n_lane_effect_padj": 501,
+    "n_lane_effect_de": 371,
+    "l2_concordance": {
+      "comparison": "treated-L2 vs control-L1 (65 samples)",
+      "lane_adjusted_de": {
+        "n_genes": 277,
+        "n_same_direction": 270,
+        "fraction": 0.9747,
+        "p_vs_half": 1.944396149960553e-70
+      },
+      "up": {
+        "n_genes": 174,
+        "n_same_direction": 171,
+        "fraction": 0.9828,
+        "p_vs_half": 7.334651031773318e-47
+      },
+      "down": {
+        "n_genes": 103,
+        "n_same_direction": 99,
+        "fraction": 0.9612,
+        "p_vs_half": 9.078769416373848e-25
+      },
+      "significant_in_l2": {
+        "n_genes": 262,
+        "n_same_direction": 260,
+        "fraction": 0.9924,
+        "p_vs_half": 9.29845473116325e-75
+      },
+      "baseline_not_de": {
+        "n_genes": 15487,
+        "n_same_direction": 9640,
+        "fraction": 0.6225,
+        "p_vs_half": 5.467055021182751e-206
+      }
+    },
+    "pca": {
+      "n_variable_genes": 2000,
+      "variance_explained": [
+        0.1716,
+        0.1116,
+        0.0757,
+        0.0644,
+        0.0502
+      ],
+      "group_means": {
+        "control-L1": {
+          "PC1": -14.91,
+          "PC2": 0.21,
+          "PC3": 0.5,
+          "PC4": -0.38,
+          "PC5": 0.34
+        },
+        "treated-L1": {
+          "PC1": 6.77,
+          "PC2": 2.65,
+          "PC3": -2.73,
+          "PC4": 0.38,
+          "PC5": -1.23
+        },
+        "treated-L2": {
+          "PC1": 17.09,
+          "PC2": -2.99,
+          "PC3": 1.92,
+          "PC4": 0.23,
+          "PC5": 0.69
+        }
+      },
+      "condition_effect_p": {
+        "PC1": 1.6364085503416788e-11,
+        "PC2": 0.4461520150252247,
+        "PC3": 0.23805997487153974,
+        "PC4": 0.5484809922957042,
+        "PC5": 0.4624138892256613
+      },
+      "lane_effect_p": {
+        "PC1": 1.4156562248495541e-09,
+        "PC2": 0.13017242401938042,
+        "PC3": 0.12060767859094357,
+        "PC4": 0.93813717383897,
+        "PC5": 0.3129994773224958
+      },
+      "treated_only": {
+        "variance_explained": [
+          0.1565,
+          0.1235,
+          0.0859,
+          0.066,
+          0.0632
+        ],
+        "lane_group_means": {
+          "L1": {
+            "PC1": 5.04,
+            "PC2": 9.78,
+            "PC3": 2.51,
+            "PC4": 0.36,
+            "PC5": -0.1
+          },
+          "L2": {
+            "PC1": -5.04,
+            "PC2": -9.78,
+            "PC3": -2.51,
+            "PC4": -0.36,
+            "PC5": 0.1
+          }
+        },
+        "lane_effect_p": {
+          "PC1": 0.0026345660958435055,
+          "PC2": 2.898034734302789e-09,
+          "PC3": 0.019893950767555468,
+          "PC4": 0.65540543793669,
+          "PC5": 0.7562221220076069
+        }
+      }
+    }
+  },
   "size_factors": {
     "SRR29702920_L1": 0.5454,
     "SRR18393978_L1": 0.9105,

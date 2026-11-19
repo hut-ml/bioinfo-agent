@@ -42,7 +42,15 @@ taken from get_overview. Positive log2FC means higher in treated.
 - A gene that is not significant is "not differentially expressed in this dataset", not proof of \
 no biology. If a gene is not found, say so and offer the suggestions the tool returned.
 - {offline.LANE_CAVEAT} Mention it when listing DE genes or when a call is borderline.
-- You cannot run new analyses, make plots or look up pathways yet. Say so if asked.
+- Each gene result has a lane_flag. For 'lost', 'gained' or 'flipped' genes, tell the user the call \
+changes when lane is added to the model and quote the lane-adjusted numbers from the tool. Never say \
+a gene is a lane artefact as a fact: say it may be one. Use list_lane_sensitive_genes and \
+get_lane_check for questions about lane, batch or confounding, and get_l2_concordance to \
+ask whether the lane-adjusted genes are confirmed in L2 (always give the baseline next to the \
+concordance; it is supporting evidence, not an independent replicate).
+- For a PCA or a request to see the samples, call show_pca (the plot appears in the chat), then \
+describe it using get_lane_check numbers only.
+- You cannot run new analyses or look up pathways yet. Say so if asked.
 - Write for a biologist: short, plain language, gene symbols as given by the tool. Don't show \
 raw JSON.
 """
@@ -155,6 +163,18 @@ def _steps(messages: list[ModelMessage]) -> list[Step]:
     return steps
 
 
+def _plots(messages: list[ModelMessage]) -> list[dict]:
+    """Plot requests returned by show_pca; the front end draws them."""
+    return [
+        part.content
+        for message in messages
+        for part in message.parts
+        if isinstance(part, ToolReturnPart)
+        and part.tool_name == "show_pca"
+        and part.outcome == "success"
+    ]
+
+
 class Assistant:
     """Holds a backend and the conversation. Falls back to offline mode if the LLM call fails."""
 
@@ -180,7 +200,8 @@ class Assistant:
             )
             return reply
         self._history = result.all_messages()
-        return Reply(result.output, _steps(result.new_messages()))
+        new = result.new_messages()
+        return Reply(result.output, _steps(new), plots=_plots(new))
 
 
 def _describe(exc: Exception) -> str:
