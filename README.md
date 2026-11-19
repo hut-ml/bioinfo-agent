@@ -28,6 +28,8 @@ uv run bioinfo-agent info     # cohort summary: genes, samples, samples per cond
 uv run pytest                 # tests
 ```
 
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs lint, tests and the `info` command on macOS and Windows.
+
 The data directory defaults to `candidate_data/`; set `BIOINFO_DATA_DIR` to use another one.
 
 ## Data notes
