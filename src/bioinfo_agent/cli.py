@@ -153,5 +153,18 @@ def chat(backend: BackendOption = "auto") -> None:
         _show(assistant.ask(question))
 
 
+@app.command()
+def ui(
+    backend: BackendOption = "auto",
+    host: Annotated[str, typer.Option(help="Interface to listen on")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port to listen on")] = 7860,
+) -> None:
+    """Open the chat in a browser (Gradio)."""
+    from bioinfo_agent.ui import launch
+
+    assistant = _assistant(backend)
+    launch(assistant.backend, host, port)
+
+
 def main() -> None:
     app()

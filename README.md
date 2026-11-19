@@ -24,7 +24,16 @@ uv sync
 ## Run
 
 ```bash
-uv run bioinfo-agent chat     # talk to the agent (see "Agent" below)
+uv run bioinfo-agent ui       # chat in the browser at http://127.0.0.1:7860
+```
+
+This is the main way to use the app. It works with no setup (offline mode); see "Agent" below to connect an LLM.
+Options: `--backend auto|openai|compatible|offline`, `--port`, `--host`.
+
+### Command line (additional tools)
+
+```bash
+uv run bioinfo-agent chat     # the same chat in the terminal
 uv run bioinfo-agent ask "Is STAT1 differentially expressed?"   # one question
 uv run bioinfo-agent info     # cohort summary: genes, samples, samples per condition
 uv run bioinfo-agent genes    # analysis overview and top DE genes (--direction up|down, -n 20, --sort-by log2fc)
@@ -33,11 +42,67 @@ uv run bioinfo-agent precompute         # re-run the DE analysis (about 20 s), r
 uv run pytest                 # tests
 ```
 
+## Architecture
+
+Two separate flows: the analysis is prepared once, then questions are answered by an agent that can only read
+the prepared results through tools.
+
+```mermaid
+flowchart TB
+    subgraph qa["2. Answering questions"]
+        direction TB
+        USER(["User"]) <-->|"question / answer"| FE["Front end<br/>ui.py (Gradio, main) or cli.py (chat, ask)"]
+        FE <--> AS["agent.py: Assistant<br/>picks the backend, keeps the conversation"]
+        AS --> LLM["LLM agent (Pydantic AI)<br/>decides which tools to call"]
+        AS -.->|"no LLM or call failed"| OFF["offline.py<br/>keyword router (backup)"]
+        LLM <-->|"tool calls / results"| T["tools.py<br/>get_overview, list_de_genes, get_genes"]
+        OFF <-->|"same tools"| T
+        T --> Q["queries.py<br/>read the results"]
+    end
+
+    subgraph prep["1. Preparation (once: bioinfo-agent precompute)"]
+        direction LR
+        IN[("candidate_data/<br/>counts.csv, metadata.csv")] --> D["data.py<br/>load and validate"]
+        D --> AN["analysis.py<br/>PyDESeq2"]
+        AN --> R[("results/<br/>de_results.csv, summary.json")]
+    end
+
+    Q -->|"reads (read-only)"| R
+```
+
+- Only `precompute` reads the raw counts. At question time everything reads `results/`, and the LLM never sees raw counts.
+- The LLM decides which tool to call and writes the answer from the tool results. Every number must come from a tool.
+- If no LLM is configured, or an LLM call fails, `Assistant` answers through the offline router, which calls the same tools.
+- The UI and the CLI share one `Assistant`, so both give the same answers. The CLI commands `genes`, `gene` and `info` skip the agent and call `queries.py` or `data.py` directly.
+
+## Project structure
+
+```text
+.
+├── candidate_data/          Input: counts.csv (genes x samples), metadata.csv
+├── results/                 Precomputed DE results (committed): de_results.csv, summary.json
+├── src/bioinfo_agent/
+│   ├── data.py              Load counts and metadata, check sample IDs, derive lane
+│   ├── analysis.py          PyDESeq2 run (`precompute`), writes results/
+│   ├── queries.py           Read results/: overview, top genes, gene lookup
+│   ├── tools.py             The three tools the agent can call (wrap queries.py)
+│   ├── offline.py           Keyword router that answers without an LLM
+│   ├── agent.py             Backend selection, Pydantic AI agent, Assistant (conversation + fallback)
+│   ├── ui.py                Gradio chat front end
+│   └── cli.py               Typer commands: ui, chat, ask, genes, gene, info, precompute
+├── tests/                   pytest (data, analysis, queries, agent, CLI, UI)
+├── .github/workflows/       CI: lint, tests, CLI smoke checks on macOS and Windows
+├── .env.example             Backend settings (OPENAI_API_KEY, LLM_BASE_URL, ...)
+└── pyproject.toml           Dependencies and the `bioinfo-agent` entry point
+```
+
 ## Agent
 
 **Quick start.** With no setup the app runs in offline mode (keyword matching, no LLM, no network), which answers the three core questions. For free-form questions, copy `.env.example` to `.env` and set your own `OPENAI_API_KEY` (or point `LLM_BASE_URL` at a local server). Then run `uv run bioinfo-agent chat`.
 
 `chat` and `ask` print each tool call and a one-line result, then the model's reasoning summary when the backend provides one, then the answer. The model never sees the raw counts: it calls three tools (`get_overview`, `list_de_genes`, `get_genes`) over the precomputed results, and its prompt requires every number to come from a tool result.
+
+`ui` serves the same agent as a Gradio chat. Each tool call, tool result and reasoning summary appears as a collapsible message above the answer, example prompts fill the input box, and the active backend is shown at the top. Each browser session has its own conversation; "New conversation" resets it.
 
 ### Backends
 
