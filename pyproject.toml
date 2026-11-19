@@ -8,7 +8,9 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "pandas>=3.1.1",
+    "pydantic-ai-slim[openai]>=2.71.0",
     "pydeseq2>=0.6.0",
+    "python-dotenv>=1.2.4",
     "typer>=0.29.2",
 ]
 

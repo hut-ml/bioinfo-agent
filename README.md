@@ -24,6 +24,8 @@ uv sync
 ## Run
 
 ```bash
+uv run bioinfo-agent chat     # talk to the agent (see "Agent" below)
+uv run bioinfo-agent ask "Is STAT1 differentially expressed?"   # one question
 uv run bioinfo-agent info     # cohort summary: genes, samples, samples per condition
 uv run bioinfo-agent genes    # analysis overview and top DE genes (--direction up|down, -n 20, --sort-by log2fc)
 uv run bioinfo-agent gene STAT1 CIITA   # look up genes (case-insensitive, suggests close names)
@@ -31,7 +33,29 @@ uv run bioinfo-agent precompute         # re-run the DE analysis (about 20 s), r
 uv run pytest                 # tests
 ```
 
-CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs lint, tests and the `info` and `gene` commands on macOS and Windows.
+## Agent
+
+**Quick start.** With no setup the app runs in offline mode (keyword matching, no LLM, no network), which answers the three core questions. For free-form questions, copy `.env.example` to `.env` and set your own `OPENAI_API_KEY` (or point `LLM_BASE_URL` at a local server). Then run `uv run bioinfo-agent chat`.
+
+`chat` and `ask` print each tool call and a one-line result, then the model's reasoning summary when the backend provides one, then the answer. The model never sees the raw counts: it calls three tools (`get_overview`, `list_de_genes`, `get_genes`) over the precomputed results, and its prompt requires every number to come from a tool result.
+
+### Backends
+
+| Backend | Settings | Notes |
+| --- | --- | --- |
+| OpenAI (best tool use) | `OPENAI_API_KEY`, optional `OPENAI_MODEL` | Only your question and tool results are sent, not the counts. |
+| Compatible (local or hosted) | `LLM_BASE_URL`, `LLM_MODEL` | Any OpenAI-compatible server. Ollama: `http://localhost:11434/v1`. llamafile: `http://localhost:8080/v1`. Small local models may skip tools or misformat calls. |
+| Offline (default) | nothing | Keyword matching for the three core questions, using the same queries. |
+
+`--backend auto|openai|compatible|offline` forces a choice. With `auto`, `LLM_BASE_URL` wins over
+`OPENAI_API_KEY`, which wins over offline. If an LLM call fails (bad key, server down), the question is
+answered in offline mode with a notice. There is one OpenAI-compatible client, so switching to a local
+server is just a different `LLM_BASE_URL`. I did not make local inference the default: on a 16 GB CPU-only
+laptop small models call tools unreliably, and a llamafile with weights above 4 GB cannot run on Windows.
+
+## Development
+
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs lint, tests and the `info`, `gene` and offline `ask` commands on macOS and Windows.
 
 The data directory defaults to `candidate_data/`; set `BIOINFO_DATA_DIR` to use another one.
 Results are read from `results/`; set `BIOINFO_RESULTS_DIR` to use another directory.

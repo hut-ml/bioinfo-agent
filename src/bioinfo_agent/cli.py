@@ -1,6 +1,9 @@
+import os
+import sys
 from typing import Annotated
 
 import typer
+from dotenv import find_dotenv, load_dotenv
 
 from bioinfo_agent import queries
 from bioinfo_agent.data import cohort_table, load_dataset
@@ -83,6 +86,71 @@ def gene(names: Annotated[list[str], typer.Argument(help="Gene symbols")]) -> No
         typer.echo(f"{label}: {g['verdict']}")
         if g.get("did_you_mean"):
             typer.echo(f"  Did you mean: {', '.join(g['did_you_mean'])}?")
+
+
+BackendOption = Annotated[
+    str,
+    typer.Option(
+        "--backend", help="auto, openai, compatible or offline (see .env.example)"
+    ),
+]
+
+
+def _assistant(backend: str):
+    from bioinfo_agent.agent import Assistant, resolve_backend
+
+    os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
+    load_dotenv(find_dotenv(usecwd=True))
+    # Model answers can contain characters a legacy Windows console cannot encode.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
+    try:
+        assistant = Assistant(resolve_backend(backend))
+        queries.load_results()
+    except (ValueError, queries.ResultsNotFound) as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"Backend: {assistant.backend.label}", err=True)
+    return assistant
+
+
+def _show(reply) -> None:
+    if reply.notice:
+        typer.echo(f"! {reply.notice}", err=True)
+    for step in reply.steps:
+        if step.kind == "thinking":
+            typer.echo(f"  (thinking) {step.text}", err=True)
+        elif step.kind == "call":
+            typer.echo(f"  -> {step.text}", err=True)
+        else:
+            typer.echo(f"  <- {step.text}", err=True)
+    typer.echo(f"\n{reply.answer}\n")
+
+
+@app.command()
+def ask(
+    question: Annotated[str, typer.Argument(help="Your question, in quotes")],
+    backend: BackendOption = "auto",
+) -> None:
+    """Ask one question. Tool calls are shown on stderr, the answer on stdout."""
+    _show(_assistant(backend).ask(question))
+
+
+@app.command()
+def chat(backend: BackendOption = "auto") -> None:
+    """Chat interactively (empty line or 'exit' to quit)."""
+    assistant = _assistant(backend)
+    typer.echo(
+        "Ask about the differential expression results. Try: How can you help me?"
+    )
+    while True:
+        try:
+            question = input("\n> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+        if not question or question.lower() in {"exit", "quit"}:
+            break
+        _show(assistant.ask(question))
 
 
 def main() -> None:
