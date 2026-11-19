@@ -16,6 +16,8 @@ app = typer.Typer(
 @app.callback()
 def _root() -> None:
     """Ask questions about a differential expression analysis."""
+    # Every command reads BIOINFO_DATA_DIR / BIOINFO_RESULTS_DIR, so load .env up front.
+    load_dotenv(find_dotenv(usecwd=True))
 
 
 @app.command()
@@ -123,7 +125,6 @@ def _assistant(backend: str):
     from bioinfo_agent.agent import Assistant, resolve_backend
 
     os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
-    load_dotenv(find_dotenv(usecwd=True))
     # Model answers can contain characters a legacy Windows console cannot encode.
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):

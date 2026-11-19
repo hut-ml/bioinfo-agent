@@ -2,14 +2,19 @@ import gradio as gr
 import pytest
 
 from bioinfo_agent.agent import Assistant, Backend
-from bioinfo_agent.offline import Reply, Step
 from bioinfo_agent.plots import pca_figure, volcano_figure
+from bioinfo_agent.reply import Reply, Step
 from bioinfo_agent.ui import (
+    PANEL_SIZE,
     TABLE_COLUMNS,
     artifact_figure,
     build_ui,
     history_frame,
+    latest_volcano,
+    mark_gene,
     new_artifacts,
+    panel_for,
+    reopen_artifact,
     reply_to_messages,
     table_frame,
 )
@@ -42,6 +47,60 @@ def test_ui_builds():
     assert build_ui(Backend("offline")) is not None
 
 
+def _artifacts(*questions):
+    out = []
+    for question in questions:
+        reply = Assistant(Backend("offline")).ask(question)
+        out += new_artifacts(out, reply, question)
+    return out
+
+
+def test_panel_shows_the_newest_plot_and_table_and_switches_tab():
+    artifacts = _artifacts("Show the volcano plot", "top 3 up genes")
+    update = panel_for(artifacts, artifacts[1:])
+    assert len(update) == PANEL_SIZE
+    assert update[0].selected == "tables"
+    assert update[4].startswith("**#2**") and len(update[5].value) == 3
+    # No plot was added: the plot and its label are left alone.
+    assert update[2] == update[1] and update[3] == update[1]
+    assert list(update[6]["#"]) == [2, 1]
+
+
+def test_history_click_reopens_an_artifact_and_ignores_unknown_ids():
+    artifacts = _artifacts("Show the volcano plot", "top 3 up genes")
+    reopened = reopen_artifact(artifacts, 1)
+    assert len(reopened) == PANEL_SIZE
+    assert reopened[0].selected == "plots" and reopened[1].startswith("**#1**")
+    assert reopen_artifact(artifacts, 99) == [gr.update()] * PANEL_SIZE
+
+
+def test_table_click_marks_the_gene_on_the_latest_volcano_model():
+    artifacts = _artifacts("Show the lane-adjusted volcano plot")
+    assert latest_volcano(artifacts)["spec"]["model"] == "lane_adjusted"
+    assert latest_volcano([])["spec"]["model"] == "headline"
+    tab, label, plot, detail = mark_gene(artifacts, "CIITA")
+    assert tab.selected == "plots" and "selected: CIITA" in label
+    assert plot.value["type"] == "plotly"  # a figure was built
+    assert detail.startswith("**CIITA**: differentially expressed")
+    assert mark_gene(artifacts, "NOT_A_GENE") == [gr.update()] * 4
+
+
+def test_chat_round_trip_through_the_running_app():
+    from gradio_client import Client
+
+    demo = build_ui(Backend("offline"))
+    _, url, _ = demo.launch(prevent_thread_lock=True, quiet=True, server_port=None)
+    try:
+        out = Client(url, verbose=False).predict(
+            "Show the volcano plot marking CIITA", api_name="/respond"
+        )
+    finally:
+        demo.close()
+    contents = [m["content"][0]["text"] for m in out[0] if m["role"] == "assistant"]
+    assert any("CIITA" in c for c in contents)
+    assert any("Added to the side panel" in c for c in contents)
+
+
 def test_plots_and_tables_become_numbered_artifacts_not_chat_content():
     question = "Show the PCA"
     reply = Assistant(Backend("offline")).ask(question)
@@ -59,7 +118,7 @@ def test_plots_and_tables_become_numbered_artifacts_not_chat_content():
     frame = history_frame([*first, *added])
     assert list(frame["#"]) == [3, 2, 1]
     assert list(frame["Type"]) == ["Table", "Plot", "Plot"]
-    assert list(table_frame(added[0]["rows"]).columns) == TABLE_COLUMNS
+    assert tuple(table_frame(added[0]["rows"]).columns) == TABLE_COLUMNS
 
 
 def test_artifact_figures_are_rebuilt_from_their_spec():

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from bioinfo_agent.analysis import (
+from bioinfo_agent.config import (
     LOG2FC_THRESHOLD,
     PADJ_THRESHOLD,
     PCA_FILE,
@@ -26,8 +26,16 @@ class ResultsNotFound(FileNotFoundError):
     pass
 
 
+def _stamp(directory: str, *names: str) -> tuple:
+    """Modification times of the files, so cached results are reloaded after `precompute` rewrites them."""
+    return tuple(
+        p.stat().st_mtime_ns if (p := Path(directory) / name).exists() else None
+        for name in names
+    )
+
+
 @lru_cache(maxsize=4)
-def _load(directory: str) -> tuple[pd.DataFrame, dict]:
+def _load(directory: str, stamp: tuple) -> tuple[pd.DataFrame, dict]:
     path = Path(directory)
     try:
         table = pd.read_csv(path / RESULTS_FILE, index_col="gene")
@@ -40,11 +48,12 @@ def _load(directory: str) -> tuple[pd.DataFrame, dict]:
 
 
 def load_results(directory: Path | str | None = None) -> tuple[pd.DataFrame, dict]:
-    return _load(str(directory or results_dir()))
+    directory = str(directory or results_dir())
+    return _load(directory, _stamp(directory, RESULTS_FILE, SUMMARY_FILE))
 
 
 @lru_cache(maxsize=8)
-def _load_pca(directory: str, subset: str) -> pd.DataFrame:
+def _load_pca(directory: str, subset: str, stamp: tuple) -> pd.DataFrame:
     name = PCA_TREATED_FILE if subset == "treated" else PCA_FILE
     try:
         return pd.read_csv(Path(directory) / name, index_col="sample_id")
@@ -58,7 +67,9 @@ def load_pca(subset: str = "all", directory: Path | str | None = None) -> pd.Dat
     """PCA scores per sample (condition, lane, PC1..PC5). subset: 'all' samples or 'treated' only."""
     if subset not in PCA_SUBSETS:
         raise ValueError(f"subset must be one of {PCA_SUBSETS}")
-    return _load_pca(str(directory or results_dir()), subset)
+    directory = str(directory or results_dir())
+    name = PCA_TREATED_FILE if subset == "treated" else PCA_FILE
+    return _load_pca(directory, subset, _stamp(directory, name))
 
 
 def _num(value, digits: int = 4):
@@ -68,7 +79,7 @@ def _num(value, digits: int = 4):
 def overview(directory: Path | str | None = None) -> dict:
     """Design, thresholds, group sizes and gene counts."""
     _, summary = load_results(directory)
-    skipped = ("size_factors", "versions", "lane_check")
+    skipped = ("versions", "lane_check")
     return {k: v for k, v in summary.items() if k not in skipped}
 
 

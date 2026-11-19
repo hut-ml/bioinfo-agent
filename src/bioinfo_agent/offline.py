@@ -1,38 +1,21 @@
 """Offline mode: a keyword router over the same tools the LLM uses. No model, no network."""
 
 import re
-from dataclasses import dataclass, field
 
 from bioinfo_agent import queries, tools
+from bioinfo_agent.config import LOG2FC_THRESHOLD, PADJ_THRESHOLD
+from bioinfo_agent.reply import Reply, Step
 from bioinfo_agent.tools import format_call, summarise_result
 
 DEFAULT_TOP_N = 10
+PC_P_CUTOFF = 0.05  # descriptive cutoff for the (unadjusted) PC separation p-values
 
-# Lane is not in the model; every L2 sample is treated.
+# The headline model ignores lane; the lane-adjusted model is a sensitivity check. Every L2 sample is treated.
 LANE_CAVEAT = (
     "Caveat: the sample ID suffix (sequencing lane) is partly confounded with condition "
-    "(every L2 sample is treated) and is not modelled, so treat borderline calls with care."
+    "(every L2 sample is treated). The headline calls ignore lane; the lane-adjusted check flags "
+    "genes whose call changes, so treat borderline and flagged calls with care."
 )
-
-
-@dataclass
-class Step:
-    """Something shown while answering: a model summary, a tool call, or a tool result."""
-
-    kind: str  # "thinking", "call" or "result"
-    text: str
-
-
-@dataclass
-class Reply:
-    answer: str
-    steps: list[Step] = field(default_factory=list)
-    notice: str | None = None
-    plots: list[dict] = field(
-        default_factory=list
-    )  # e.g. {"plot": "pca", "x": 1, "y": 2}
-    tables: list[dict] = field(default_factory=list)  # {"title": ..., "rows": [...]}
-
 
 # Words that look like gene symbols once upper-cased but are almost always plain English.
 _STOPWORDS = {
@@ -96,7 +79,9 @@ def _wants_concordance(q: str) -> bool:
 def _wants_lane(q: str) -> bool:
     return bool(
         re.search(
-            r"\blanes?\b|\bl1\b|\bl2\b|batch|confound|artefact|artifact|sensitiv", q
+            r"\blanes?\b|\bl1\b|\bl2\b|batch|confound|artefact|artifact|sensitiv|"
+            r"\b(lost|gained|flipped)\b",
+            q,
         )
     )
 
@@ -192,8 +177,8 @@ def lane_summary(lc: dict) -> list[str]:
             f"{flags.get('flipped', 0)} flip direction."
         ),
         (
-            f"The two treated lanes differ at padj < 0.05 for {lc['n_lane_effect_padj']} genes "
-            f"({lc['n_lane_effect_de']} with |log2FC| >= 1), although every sample in both is treated."
+            f"The two treated lanes differ at padj < {PADJ_THRESHOLD:g} for {lc['n_lane_effect_padj']} genes "
+            f"({lc['n_lane_effect_de']} with |log2FC| >= {LOG2FC_THRESHOLD:g}), although every sample in both is treated."
         ),
     ]
     pca = lc["pca"]
@@ -206,7 +191,9 @@ def lane_summary(lc: dict) -> list[str]:
         f"p = {pca['lane_effect_p']['PC1']:.1g}."
     )
     treated = pca["treated_only"]
-    lane_pcs = sorted((p, pc) for pc, p in treated["lane_effect_p"].items() if p < 0.05)
+    lane_pcs = sorted(
+        (p, pc) for pc, p in treated["lane_effect_p"].items() if p < PC_P_CUTOFF
+    )
     if lane_pcs:
         shown = ", ".join(f"{pc} (p = {p:.1g})" for p, pc in lane_pcs)
         lines.append(
@@ -218,7 +205,7 @@ def lane_summary(lc: dict) -> list[str]:
             "Among the treated samples only, L1 and L2 do not separate on any of the first "
             f"{len(treated['lane_effect_p'])} PCs."
         )
-    if pca["lane_effect_p"]["PC1"] < 0.05:
+    if pca["lane_effect_p"]["PC1"] < PC_P_CUTOFF:
         lines.append(
             "So lane shifts samples along the same axis as the treatment: the confounding is "
             "real, and calls for genes marked 'lost' should be treated with caution."
@@ -339,7 +326,7 @@ def _pca_answer(q: str) -> Reply:
 
 
 def answer(question: str) -> Reply:
-    """Answer the three supported kinds of question, or explain what is supported."""
+    """Answer the supported kinds of question (genes, DE lists, volcano, PCA, lane), or explain what is supported."""
     q = question.lower()
     table, _ = queries.load_results()
     names = _gene_candidates(question, set(table.index.str.upper()))

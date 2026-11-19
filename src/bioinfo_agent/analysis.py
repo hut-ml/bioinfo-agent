@@ -1,7 +1,6 @@
 """Differential expression (treated vs control) with PyDESeq2."""
 
 import json
-import os
 from importlib.metadata import version
 from pathlib import Path
 
@@ -11,26 +10,21 @@ from pydeseq2.dds import DeseqDataSet
 from pydeseq2.ds import DeseqStats
 from scipy.stats import binomtest, mannwhitneyu
 
-from bioinfo_agent.data import PROJECT_ROOT, Dataset, add_lane
-
-PADJ_THRESHOLD = 0.05
-LOG2FC_THRESHOLD = 1.0
-MIN_TOTAL_COUNT = 10
-
-DESIGN = "~ condition"
-DESIGN_LANE_ADJUSTED = "~ lane + condition"
-
-N_PCS = 5
-N_VARIABLE_GENES = 2000
-
-RESULTS_FILE = "de_results.csv"
-SUMMARY_FILE = "summary.json"
-PCA_FILE = "pca.csv"
-PCA_TREATED_FILE = "pca_treated.csv"
-
-
-def results_dir() -> Path:
-    return Path(os.environ.get("BIOINFO_RESULTS_DIR", PROJECT_ROOT / "results"))
+from bioinfo_agent.config import (
+    DESIGN,
+    DESIGN_LANE_ADJUSTED,
+    LOG2FC_THRESHOLD,
+    MIN_TOTAL_COUNT,
+    N_PCS,
+    N_VARIABLE_GENES,
+    PADJ_THRESHOLD,
+    PCA_FILE,
+    PCA_TREATED_FILE,
+    RESULTS_FILE,
+    SUMMARY_FILE,
+    results_dir,
+)
+from bioinfo_agent.data import Dataset, add_lane
 
 
 def _fit(
@@ -40,16 +34,21 @@ def _fit(
     factor: str,
     level: str,
     reference: str,
-):
-    """Fit DESeq2 and return (results with shrunken log2FC, size factors).
+) -> pd.DataFrame:
+    """Fit DESeq2 and return the results with an added shrunken log2FC (`log2fc_shrunk`).
 
-    The effect reported is `level` vs `reference` of `factor`.
+    The effect reported is `level` vs `reference` of `factor`. The reference is set through the
+    category order (PyDESeq2 0.6 ignores `ref_level`), which also names the coefficient
+    `factor[T.level]` used for shrinkage.
     """
+    design_metadata = metadata[["condition", "lane"]].copy()
+    design_metadata[factor] = pd.Categorical(
+        design_metadata[factor], categories=[reference, level]
+    )
     dds = DeseqDataSet(
         counts=counts.T,
-        metadata=metadata[["condition", "lane"]],
+        metadata=design_metadata,
         design=design,
-        ref_level=[factor, reference],
         quiet=True,
     )
     dds.deseq2()
@@ -63,7 +62,7 @@ def _fit(
     res = stats.results_df.copy()
     stats.lfc_shrink(coeff=f"{factor}[T.{level}]")
     res["log2fc_shrunk"] = stats.results_df["log2FoldChange"]
-    return res, dds.obs["size_factors"]
+    return res
 
 
 def call_direction(padj: pd.Series, log2fc: pd.Series) -> pd.Series:
@@ -213,12 +212,12 @@ def run_de(
     counts = dataset.counts.loc[:, metadata.index]
     kept = counts.loc[counts.sum(axis=1) >= MIN_TOTAL_COUNT]
 
-    main, size_factors = _fit(kept, metadata, DESIGN, "condition", "treated", "control")
-    adjusted, _ = _fit(
+    main = _fit(kept, metadata, DESIGN, "condition", "treated", "control")
+    adjusted = _fit(
         kept, metadata, DESIGN_LANE_ADJUSTED, "condition", "treated", "control"
     )
     treated = metadata.index[metadata["condition"] == "treated"]
-    lane_effect, _ = _fit(
+    lane_effect = _fit(
         kept[treated], metadata.loc[treated], "~ lane", "lane", "L2", "L1"
     )
 
@@ -226,7 +225,7 @@ def run_de(
         ((metadata["condition"] == "control") & (metadata["lane"] == "L1"))
         | ((metadata["condition"] == "treated") & (metadata["lane"] == "L2"))
     ]
-    l2_vs_control, _ = _fit(
+    l2_vs_control = _fit(
         kept[l2_samples],
         metadata.loc[l2_samples],
         DESIGN,
@@ -303,12 +302,11 @@ def run_de(
             ),
             "n_lane_effect_de": int((lane_de != "ns").sum()),
             "l2_concordance": {
-                "comparison": "treated-L2 vs control-L1 (65 samples)",
+                "comparison": f"treated-L2 vs control-L1 ({len(l2_samples)} samples)",
                 **l2_concordance(table),
             },
             "pca": pca_summary,
         },
-        "size_factors": {k: round(float(v), 4) for k, v in size_factors.items()},
         "versions": {"pydeseq2": version("pydeseq2"), "pandas": pd.__version__},
     }
     return table, summary, scores, scores_treated

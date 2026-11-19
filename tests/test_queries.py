@@ -1,7 +1,7 @@
 import pytest
 
 from bioinfo_agent import queries
-from bioinfo_agent.analysis import LOG2FC_THRESHOLD, PADJ_THRESHOLD
+from bioinfo_agent.config import LOG2FC_THRESHOLD, PADJ_THRESHOLD
 
 EXAMPLE_GENES = ["CIITA", "SPATS2L", "IDH3B", "STAT1"]
 
@@ -101,3 +101,9 @@ def test_l2_concordance_is_high_for_lane_adjusted_genes_and_above_its_baseline()
     assert c["lane_adjusted_de"]["fraction"] > 0.9
     # The lane shift alone lifts the baseline above 50%, so the excess is what matters.
     assert c["baseline_not_de"]["fraction"] < c["lane_adjusted_de"]["fraction"] - 0.2
+
+
+def test_committed_results_match_the_numbers_in_the_readme():
+    flags = queries.lane_check()["flags"]
+    assert (flags["same"], flags["lost"], flags["gained"]) == (15742, 67, 22)
+    assert "flipped" not in flags

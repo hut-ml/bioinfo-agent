@@ -1,5 +1,5 @@
 import pytest
-from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
@@ -99,6 +99,31 @@ def test_llm_failure_falls_back_to_offline_with_a_notice():
     )
     assert reply.notice and "offline mode" in reply.notice
     assert "STAT1: not differentially expressed" in reply.answer
+
+
+def test_offline_lane_flag_words_alone_route_to_the_lane_tools():
+    reply = offline.answer("Which genes are lost?")
+    assert reply.steps[2].text.startswith("list_lane_sensitive_genes(flag='lost'")
+
+
+def test_any_agent_run_error_falls_back_to_offline():
+    def over_limit(messages, info):
+        raise UsageLimitExceeded("too many requests")
+
+    reply = Assistant(Backend("openai"), build_agent(FunctionModel(over_limit))).ask(
+        "Is STAT1 DE?"
+    )
+    assert reply.notice and "UsageLimitExceeded" in reply.notice
+    assert "STAT1: not differentially expressed" in reply.answer
+
+
+def test_api_key_is_not_in_the_backend_repr():
+    assert "sk-secret" not in repr(Backend("openai", api_key="sk-secret"))
+
+
+def test_offline_lane_caveat_matches_the_lane_adjusted_check():
+    assert "not modelled" not in offline.LANE_CAVEAT
+    assert "lane-adjusted" in offline.LANE_CAVEAT
 
 
 def test_offline_answers_the_three_required_questions():

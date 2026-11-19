@@ -9,8 +9,9 @@ import pandas as pd
 
 from bioinfo_agent import queries
 from bioinfo_agent.agent import Assistant, Backend
-from bioinfo_agent.offline import Reply
 from bioinfo_agent.plots import pca_figure, volcano_figure
+from bioinfo_agent.reply import Reply
+from bioinfo_agent.tools import TABLE_COLUMNS
 
 EXAMPLES = [
     "How can you help me?",
@@ -34,16 +35,6 @@ _STEP_TITLES = {
     "result": "Tool result",
 }
 
-TABLE_COLUMNS = [
-    "gene",
-    "direction",
-    "log2fc",
-    "padj",
-    "base_mean",
-    "lane_flag",
-    "log2fc_lane_adjusted",
-    "padj_lane_adjusted",
-]
 HISTORY_COLUMNS = ["#", "Type", "Title", "Asked"]
 PLOTS_TAB, TABLES_TAB, HISTORY_TAB = "plots", "tables", "history"
 EMPTY_PLOT = "Plots requested in the chat (volcano, PCA) appear here."
@@ -60,17 +51,18 @@ def plot_title(spec: dict) -> str:
 
 def new_artifacts(artifacts: list[dict], reply: Reply, question: str) -> list[dict]:
     """The reply's plots and tables as numbered artifacts, to append to the session's list."""
-    made = []
-    for spec in reply.plots:
-        made.append(
-            {"kind": "plot", "title": plot_title(spec), "spec": spec}
-            | {"question": question}
-        )
-    for table in reply.tables:
-        made.append(
-            {"kind": "table", "title": table["title"], "rows": table["rows"]}
-            | {"question": question}
-        )
+    made = [
+        {"kind": "plot", "title": plot_title(spec), "spec": spec, "question": question}
+        for spec in reply.plots
+    ] + [
+        {
+            "kind": "table",
+            "title": table["title"],
+            "rows": table["rows"],
+            "question": question,
+        }
+        for table in reply.tables
+    ]
     start = len(artifacts) + 1
     return [{"id": start + i, **a} for i, a in enumerate(made)]
 
@@ -82,7 +74,7 @@ def artifact_figure(spec: dict, highlight: tuple[str, ...] = ()):
 
 
 def table_frame(rows: list[dict]) -> pd.DataFrame:
-    return pd.DataFrame(rows, columns=TABLE_COLUMNS)
+    return pd.DataFrame(rows, columns=list(TABLE_COLUMNS))
 
 
 def history_frame(artifacts: list[dict]) -> pd.DataFrame:
@@ -144,6 +136,70 @@ def _show_table(artifact: dict) -> tuple:
     )
 
 
+# Outputs of the side panel, in order: tabs, plot label, plot, gene detail, table label, table, history.
+PANEL_SIZE = 7
+
+
+def panel_for(artifacts: list[dict], added: list[dict]) -> list:
+    """Panel updates showing the newest added plot and table, and switching to the tab of the
+    newest artifact. Everything else is left as it is."""
+    keep = gr.update()
+    plots = [a for a in added if a["kind"] == "plot"]
+    tables = [a for a in added if a["kind"] == "table"]
+    plot_up, plot_label_up = _show_plot(plots[-1]) if plots else (keep, keep)
+    table_up, table_label_up = _show_table(tables[-1]) if tables else (keep, keep)
+    tab = keep
+    if added:
+        tab = gr.Tabs(selected=PLOTS_TAB if added[-1]["kind"] == "plot" else TABLES_TAB)
+    return [
+        tab,
+        plot_label_up,
+        plot_up,
+        "" if plots else keep,
+        table_label_up,
+        table_up,
+        history_frame(artifacts),
+    ]
+
+
+def reopen_artifact(artifacts: list[dict], artifact_id) -> list:
+    """History row click: reopen that plot or table (the history itself is left as it is)."""
+    chosen = next((a for a in artifacts if a["id"] == artifact_id), None)
+    if chosen is None:
+        return [gr.update()] * PANEL_SIZE
+    return panel_for(artifacts, [chosen])[:-1] + [gr.update()]
+
+
+def latest_volcano(artifacts: list[dict]) -> dict:
+    """The newest volcano plot of the conversation, else a headline one."""
+    found = next(
+        (
+            a
+            for a in reversed(artifacts)
+            if a["kind"] == "plot" and a["spec"]["plot"] == "volcano"
+        ),
+        None,
+    )
+    if found:
+        return found
+    spec = {"plot": "volcano", "model": "headline", "genes": []}
+    return {"id": "-", "kind": "plot", "title": plot_title(spec), "spec": spec}
+
+
+def mark_gene(artifacts: list[dict], gene: str) -> list:
+    """Table row click: mark the gene on a volcano plot and show its verdict."""
+    found = queries.get_genes([gene])[0]
+    if not found["found"]:
+        return [gr.update()] * 4
+    plot_up, label_up = _show_plot(latest_volcano(artifacts), (gene,))
+    return [
+        gr.Tabs(selected=PLOTS_TAB),
+        label_up,
+        plot_up,
+        f"**{gene}**: {found['verdict']}",
+    ]
+
+
 def build_ui(backend: Backend) -> gr.Blocks:
     with gr.Blocks(title="bioinfo-agent") as demo:
         gr.Markdown(
@@ -187,7 +243,7 @@ def build_ui(backend: Backend) -> gr.Blocks:
             with gr.Tab("📋 Tables", id=TABLES_TAB):
                 table_label = gr.Markdown(EMPTY_TABLE)
                 table_out = gr.Dataframe(
-                    headers=TABLE_COLUMNS,
+                    headers=list(TABLE_COLUMNS),
                     interactive=False,
                     show_search="filter",
                     max_height=520,
@@ -210,31 +266,6 @@ def build_ui(backend: Backend) -> gr.Blocks:
             history_out,
         ]
         keep = gr.update()
-
-        def panel_for(artifacts: list[dict], added: list[dict]) -> list:
-            """Show the newest added plot and table, switch to the tab with the newest artifact."""
-            plots = [a for a in added if a["kind"] == "plot"]
-            tables = [a for a in added if a["kind"] == "table"]
-            plot_label_up, plot_up = (keep, keep)
-            table_label_up, table_up = (keep, keep)
-            if plots:
-                plot_up, plot_label_up = _show_plot(plots[-1])
-            if tables:
-                table_up, table_label_up = _show_table(tables[-1])
-            tab = keep
-            if added:
-                tab = gr.Tabs(
-                    selected=PLOTS_TAB if added[-1]["kind"] == "plot" else TABLES_TAB
-                )
-            return [
-                tab,
-                plot_label_up,
-                plot_up,
-                "" if plots else keep,
-                table_label_up,
-                table_up,
-                history_frame(artifacts),
-            ]
 
         def respond(question, shown, assistant, artifacts):
             question = (question or "").strip()
@@ -270,41 +301,10 @@ def build_ui(backend: Backend) -> gr.Blocks:
             yield [shown, shown, assistant, artifacts, "", *panel_for(artifacts, added)]
 
         def open_artifact(artifacts, evt: gr.SelectData):
-            """History row click: reopen that plot or table."""
-            chosen = next((a for a in artifacts if a["id"] == evt.row_value[0]), None)
-            if chosen is None:
-                return [keep] * len(panel)
-            return panel_for(artifacts, [chosen])[:-1] + [keep]
+            return reopen_artifact(artifacts, evt.row_value[0])
 
-        def mark_gene(artifacts, evt: gr.SelectData):
-            """Table row click: mark that gene on a volcano plot and show its verdict."""
-            gene = str(evt.row_value[0])
-            found = queries.get_genes([gene])[0]
-            if not found["found"]:
-                return [keep] * 4
-            # Reuse the model of the newest volcano plot in this conversation, else the headline one.
-            volcano = next(
-                (
-                    a
-                    for a in reversed(artifacts)
-                    if a["kind"] == "plot" and a["spec"]["plot"] == "volcano"
-                ),
-                None,
-            ) or {
-                "id": "-",
-                "kind": "plot",
-                "title": plot_title(
-                    {"plot": "volcano", "model": "headline", "genes": []}
-                ),
-                "spec": {"plot": "volcano", "model": "headline", "genes": []},
-            }
-            plot_up, label_up = _show_plot(volcano, (gene,))
-            return [
-                gr.Tabs(selected=PLOTS_TAB),
-                label_up,
-                plot_up,
-                f"**{gene}**: {found['verdict']}",
-            ]
+        def mark_selected_gene(artifacts, evt: gr.SelectData):
+            return mark_gene(artifacts, str(evt.row_value[0]))
 
         chat_inputs = [box, shown_state, assistant_state, artifacts_state]
         chat_outputs = [
@@ -320,7 +320,7 @@ def build_ui(backend: Backend) -> gr.Blocks:
 
         history_out.select(open_artifact, artifacts_state, panel)
         table_out.select(
-            mark_gene,
+            mark_selected_gene,
             artifacts_state,
             [tabs, plot_label, plot_out, gene_detail],
         )
@@ -336,7 +336,7 @@ def build_ui(backend: Backend) -> gr.Blocks:
                 None,
                 "",
                 EMPTY_TABLE,
-                pd.DataFrame(columns=TABLE_COLUMNS),
+                pd.DataFrame(columns=list(TABLE_COLUMNS)),
                 pd.DataFrame(columns=HISTORY_COLUMNS),
             ),
             None,

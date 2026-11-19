@@ -140,11 +140,13 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "gradio" },
+    { name = "numpy" },
     { name = "pandas" },
     { name = "plotly" },
     { name = "pydantic-ai-slim", extra = ["openai"] },
     { name = "pydeseq2" },
     { name = "python-dotenv" },
+    { name = "scipy" },
     { name = "typer" },
 ]
 
@@ -157,11 +159,13 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "gradio", specifier = ">=6.32.0" },
+    { name = "numpy", specifier = ">=2.5.5" },
     { name = "pandas", specifier = ">=3.1.1" },
     { name = "plotly", specifier = ">=7.1.0" },
     { name = "pydantic-ai-slim", extras = ["openai"], specifier = ">=2.71.0" },
     { name = "pydeseq2", specifier = ">=0.6.0" },
     { name = "python-dotenv", specifier = ">=1.2.4" },
+    { name = "scipy", specifier = ">=1.18.1" },
     { name = "typer", specifier = ">=0.29.2" },
 ]
 

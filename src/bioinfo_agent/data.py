@@ -1,16 +1,11 @@
 """Load the raw counts and sample metadata."""
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-
-def data_dir() -> Path:
-    return Path(os.environ.get("BIOINFO_DATA_DIR", PROJECT_ROOT / "candidate_data"))
+from bioinfo_agent.config import data_dir
 
 
 @dataclass

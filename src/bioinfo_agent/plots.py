@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from bioinfo_agent import queries
-from bioinfo_agent.analysis import N_PCS
+from bioinfo_agent.config import N_PCS
 
 CONDITION_COLORS = {"control": "#1f77b4", "treated": "#d95f02"}
 LANE_COLORS = {"L1": "#2a9d8f", "L2": "#7b2cbf"}
@@ -18,7 +18,7 @@ GROUP_SYMBOLS = {
 }
 
 
-def _check_components(x: int, y: int) -> None:
+def check_components(x: int, y: int) -> None:
     if not (1 <= x <= N_PCS and 1 <= y <= N_PCS) or x == y:
         raise ValueError(f"x and y must be two different components from 1 to {N_PCS}")
 
@@ -26,7 +26,7 @@ def _check_components(x: int, y: int) -> None:
 def pca_figure(x: int = 1, y: int = 2, subset: str = "all") -> go.Figure:
     """Sample PCA. 'all': twice, coloured by condition (left) and by lane (right).
     'treated': treated samples only, coloured by lane."""
-    _check_components(x, y)
+    check_components(x, y)
     scores = queries.load_pca(subset)
     _, summary = queries.load_results()
     pca = summary["lane_check"]["pca"]

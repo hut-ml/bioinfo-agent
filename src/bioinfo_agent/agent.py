@@ -3,11 +3,11 @@ precomputed results, with an offline keyword router as fallback."""
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from pydantic_ai import Agent
-from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior
+from pydantic_ai.exceptions import AgentRunError
 from pydantic_ai.messages import (
     ModelMessage,
     ThinkingPart,
@@ -23,7 +23,7 @@ from pydantic_ai.models.openai import (
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from bioinfo_agent import offline, tools
-from bioinfo_agent.offline import Reply, Step
+from bioinfo_agent.reply import Reply, Step
 
 DEFAULT_OPENAI_MODEL = "gpt-6.1-terra"
 DEFAULT_COMPATIBLE_MODEL = "default"
@@ -63,7 +63,7 @@ class Backend:
     kind: Literal["openai", "compatible", "offline"]
     model: str | None = None
     base_url: str | None = None
-    api_key: str | None = None
+    api_key: str | None = field(default=None, repr=False)
     reasoning: str = "off"  # OpenAI only: "off" or an effort level
 
     @property
@@ -165,9 +165,6 @@ def _steps(messages: list[ModelMessage]) -> list[Step]:
     return steps
 
 
-PLOT_TOOLS = ("show_pca", "show_volcano")
-
-
 def _plots(messages: list[ModelMessage]) -> list[dict]:
     """Plot requests returned by show_pca and show_volcano; the front end draws them."""
     return [
@@ -175,7 +172,7 @@ def _plots(messages: list[ModelMessage]) -> list[dict]:
         for message in messages
         for part in message.parts
         if isinstance(part, ToolReturnPart)
-        and part.tool_name in PLOT_TOOLS
+        and part.tool_name in tools.PLOT_TOOLS
         and part.outcome == "success"
     ]
 
@@ -219,7 +216,7 @@ class Assistant:
             return offline.answer(question)
         try:
             result = self._agent.run_sync(question, message_history=self._history)
-        except (ModelAPIError, UnexpectedModelBehavior) as exc:
+        except AgentRunError as exc:
             reply = offline.answer(question)
             reply.notice = (
                 f"The LLM call failed ({_describe(exc)}); answered in offline mode."

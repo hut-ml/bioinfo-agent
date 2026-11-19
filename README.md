@@ -39,7 +39,7 @@ uv run bioinfo-agent info     # cohort summary: genes, samples, samples per cond
 uv run bioinfo-agent genes    # analysis overview and top DE genes (--direction up|down, -n 20, --sort-by log2fc)
 uv run bioinfo-agent gene STAT1 CIITA   # look up genes (case-insensitive, suggests close names)
 uv run bioinfo-agent lane               # lane confounding check: summary and genes whose call changes with lane
-uv run bioinfo-agent precompute         # re-run the analysis and PCA (about 40 s), rewrites results/
+uv run bioinfo-agent precompute         # re-run the analysis and PCA (about a minute), rewrites results/
 uv run pytest                 # tests
 ```
 
@@ -65,7 +65,7 @@ flowchart TB
         direction LR
         IN[("candidate_data/<br/>counts.csv, metadata.csv")] --> D["data.py<br/>load and validate"]
         D --> AN["analysis.py<br/>PyDESeq2"]
-        AN --> R[("results/<br/>de_results.csv, summary.json")]
+        AN --> R[("results/<br/>de_results.csv, pca.csv, pca_treated.csv, summary.json")]
     end
 
     Q -->|"reads (read-only)"| R
@@ -83,24 +83,26 @@ flowchart TB
 ├── candidate_data/          Input: counts.csv (genes x samples), metadata.csv
 ├── results/                 Precomputed (committed): de_results.csv, pca.csv, pca_treated.csv, summary.json
 ├── src/bioinfo_agent/
+│   ├── config.py            Thresholds, file names, data/results paths (light imports only)
 │   ├── data.py              Load counts and metadata, check sample IDs, derive lane
 │   ├── analysis.py          PyDESeq2 runs (three models) and PCA (`precompute`), writes results/
 │   ├── queries.py           Read results/: overview, top genes, gene lookup, lane check
-│   ├── tools.py             The eight tools the agent can call (wrap queries.py)
+│   ├── tools.py             The eight tools the agent can call (wrap queries.py), plus result summaries
 │   ├── plots.py             Volcano and PCA figures (plotly), built from results/
+│   ├── reply.py             Reply and Step: what an answer looks like to the CLI and UI
 │   ├── offline.py           Keyword router that answers without an LLM
 │   ├── agent.py             Backend selection, Pydantic AI agent, Assistant (conversation + fallback)
 │   ├── ui.py                Gradio front end: chat, plus a side panel for plots, tables and history
 │   └── cli.py               Typer commands: ui, chat, ask, genes, gene, lane, info, precompute
-├── tests/                   pytest (data, analysis, queries, agent, CLI, UI)
-├── .github/workflows/       CI: lint, tests, CLI smoke checks on macOS and Windows
+├── tests/                   pytest (data, analysis on a small synthetic dataset, queries, agent, CLI, UI)
+├── .github/workflows/       CI: lint, format check, tests, CLI smoke checks on Linux, macOS and Windows
 ├── .env.example             Backend settings (OPENAI_API_KEY, LLM_BASE_URL, ...)
 └── pyproject.toml           Dependencies and the `bioinfo-agent` entry point
 ```
 
 ## Agent
 
-**Quick start.** With no setup the app runs in offline mode (keyword matching, no LLM, no network), which answers the three core questions. For free-form questions, copy `.env.example` to `.env` and set your own `OPENAI_API_KEY` (or point `LLM_BASE_URL` at a local server). Then run `uv run bioinfo-agent chat`.
+**Quick start.** With no setup the app runs in offline mode (keyword matching, no LLM, no network), which answers gene, DE-list, volcano, PCA and lane questions. For free-form questions, copy `.env.example` to `.env` and set your own `OPENAI_API_KEY` (or point `LLM_BASE_URL` at a local server). Then run `uv run bioinfo-agent chat`.
 
 `chat` and `ask` print each tool call and a one-line result, then the model's reasoning summary when the backend provides one, then the answer. The model never sees the raw counts: it calls eight tools over the precomputed results (`get_overview`, `list_de_genes`, `get_genes`, and for the lane question `list_lane_sensitive_genes`, `get_lane_check`, `get_l2_concordance`, `show_pca`, `show_volcano`), and its prompt requires every number to come from a tool result.
 
@@ -112,7 +114,7 @@ flowchart TB
 | --- | --- | --- |
 | OpenAI (best tool use) | `OPENAI_API_KEY`, optional `OPENAI_MODEL` | Only your question and tool results are sent, not the counts. |
 | Compatible (local or hosted) | `LLM_BASE_URL`, `LLM_MODEL` | Any OpenAI-compatible server. Ollama: `http://localhost:11434/v1`. llamafile: `http://localhost:8080/v1`. Small local models may skip tools or misformat calls. |
-| Offline (default) | nothing | Keyword matching for the three core questions, using the same queries. |
+| Offline (default) | nothing | Keyword matching for gene, DE-list, volcano, PCA and lane questions, using the same queries. |
 
 `--backend auto|openai|compatible|offline` forces a choice. With `auto`, `LLM_BASE_URL` wins over
 `OPENAI_API_KEY`, which wins over offline. If an LLM call fails (bad key, server down), the question is
@@ -122,10 +124,15 @@ laptop small models call tools unreliably, and a llamafile with weights above 4 
 
 ## Development
 
-CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs lint, tests and the `info`, `gene` and offline `ask` commands on macOS and Windows.
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs lint, the format check, tests and the `info`, `gene`, `lane` and offline `ask` commands on Linux, macOS and Windows.
 
 The data directory defaults to `candidate_data/`; set `BIOINFO_DATA_DIR` to use another one.
 Results are read from `results/`; set `BIOINFO_RESULTS_DIR` to use another directory.
+Both can be set in `.env`, which every command loads. The default paths are relative to the source checkout, so run the app from a clone (`uv sync`), not from a built wheel.
+
+The UI has no login. It listens on `127.0.0.1` by default; do not use `--host 0.0.0.0` with an `OPENAI_API_KEY` set unless the network is trusted, since anyone who can reach the page spends your quota.
+
+The tests run the whole pipeline (PyDESeq2, PCA, saving, querying) on a small synthetic dataset with planted up, down and lane-only effects (`tests/conftest.py`), so they take seconds. They also check the committed `results/` against the numbers quoted below.
 
 ## Data notes
 
@@ -139,7 +146,7 @@ Results are read from `results/`; set `BIOINFO_RESULTS_DIR` to use another direc
 
 The analysis is precomputed with [PyDESeq2](https://pydeseq2.readthedocs.io/) and committed in
 `results/de_results.csv` (one row per gene), `results/pca.csv` and `results/pca_treated.csv` (sample scores, all and treated only) and `results/summary.json`
-(design, thresholds, counts, lane check, size factors). Questions are answered from these files only.
+(design, thresholds, counts, lane check, versions). Questions are answered from these files only.
 
 - **Filter:** genes with fewer than 10 reads in total are dropped (none were: all 15,831 genes are tested).
 - **Headline model:** `~ condition`, treated vs control. A positive log2FC means higher in treated.
@@ -209,6 +216,39 @@ Two adjusted p-values answer different questions on different samples, so read t
 | IDH3B | Not DE: log2FC -0.06, padj 1 | Down: -1.06, padj 1e-138 | `gained`: treated-L2 is higher than treated-L1 (+1.56), which hides a decrease seen in L1. |
 | STAT1 | Not DE: log2FC -0.03, padj 1 | Not DE: -0.05, padj 1 | Not DE either way. |
 
-### Observations and future directions
+### Observations
 
 - Sex-marker genes are not in the data, so sex balance across groups cannot be checked.
+
+## Deep directions
+
+I chose two directions. Both make sure the scientific findings are correct and well explained to biologists, and that the agent output can be used and investigated by the end user.
+
+1. **Lane adjustment analysis.** Lane is partly confounded with treatment (every L2 sample is treated), so the headline result alone could mislead. Four checks (lane-adjusted model, treated L2 vs L1, PCA, directional check in L2) flag each gene as `same`, `lost`, `gained` or `flipped`, and the agent adds a caution to flagged genes.
+2. **Frontend UI.** A chat with a navigable panel: interactive volcano plot, PCA plots, clickable gene tables and a history of every plot and table, so the user can investigate the results behind each answer.
+
+## Future development
+
+- Conversation and analysis database: remember interactions per user and pull up past analyses quickly. Results are stored as CSV now; a database scales better.
+- Collect feedback from end users and stakeholders to find missing features.
+- LLM as a judge on a golden dataset: completeness, correctness and whether the tool-call path makes sense for different inputs.
+- Version control and traceability (MLflow, LangSmith, ...): prompts, eval dataset, inputs, and each call.
+
+## Use of coding assistants
+
+Most of the code was generated by an assistant. The code verification, architecture, UI and tools were designed by me, which let me iterate quickly to an MVP.
+
+Version control is organised by building blocks, each tested and working before the next:
+
+1. Project setup
+2. Test/CI workflow
+3. Deterministic analysis with PyDESeq2
+4. Agentic harness (model, tools, etc.) with basic features
+5. Chatbot UI
+6. Extra features
+
+- **Checked:** mostly the workflow, e.g. that the differential analysis uses the right input and follows the PyDESeq2 example.
+- **Corrected:** mostly the architecture, e.g. I moved the agent tools into their own file (`tools.py`) so they are reusable and easier to navigate.
+- **Rejected:** some UI changes that were too time-consuming for a prototype.
+- **Pros:** efficiency and debugging, which allow quick prototyping.
+- **Cons:** every change must be clearly specified; under-specification can lead to unwanted changes. The human has to act as reviewer and architect.
